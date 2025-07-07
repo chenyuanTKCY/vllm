@@ -7,6 +7,7 @@ from typing import Union
 from vllm.lora.request import LoRARequest
 from vllm.sequence import (PromptLogprobs, RequestMetrics, SampleLogprobs,
                            SequenceGroup, SequenceStatus)
+import torch
 
 
 @dataclass
@@ -26,6 +27,7 @@ class CompletionOutput:
             to stop, None if the completion finished for some other reason
             including encountering the EOS token.
         lora_request: The LoRA request that was used to generate the output.
+        prefill_hidden_states: The prefill hidden states of the sequence.
     """
 
     index: int
@@ -36,6 +38,7 @@ class CompletionOutput:
     finish_reason: Optional[str] = None
     stop_reason: Union[int, str, None] = None
     lora_request: Optional[LoRARequest] = None
+    prefill_hidden_states: Optional[torch.Tensor] = None
 
     def finished(self) -> bool:
         return self.finish_reason is not None
@@ -86,6 +89,7 @@ class RequestOutput:
                         None if decoder-only
         encoder_prompt_token_ids: The token IDs of the encoder prompt;
                                   None if decoder-only
+        prefill_hidden_states: The prefill hidden states of the request.
     """
 
     def __init__(
@@ -100,6 +104,7 @@ class RequestOutput:
         lora_request: Optional[LoRARequest] = None,
         encoder_prompt: Optional[str] = None,
         encoder_prompt_token_ids: Optional[List[int]] = None,
+        prefill_hidden_states: Optional[torch.Tensor] = None,
     ) -> None:
         self.request_id = request_id
         self.prompt = prompt
@@ -111,6 +116,7 @@ class RequestOutput:
         self.lora_request = lora_request
         self.encoder_prompt = encoder_prompt
         self.encoder_prompt_token_ids = encoder_prompt_token_ids
+        self.prefill_hidden_states = prefill_hidden_states
 
     @classmethod
     def from_seq_group(cls, seq_group: SequenceGroup) -> "RequestOutput":
@@ -145,7 +151,8 @@ class RequestOutput:
                 seq.get_cumulative_logprob() if include_logprobs else None,
                 seq.output_logprobs if include_logprobs else None,
                 SequenceStatus.get_finished_reason(seq.status),
-                seq.stop_reason) for seq in top_n_seqs
+                seq.stop_reason,
+                prefill_hidden_states=getattr(seq_group, "prefill_hidden_states", None)) for seq in top_n_seqs
         ]
 
         # Every sequence in the sequence group should have the same prompt.
@@ -166,7 +173,8 @@ class RequestOutput:
                    seq_group.metrics,
                    lora_request=seq_group.lora_request,
                    encoder_prompt=encoder_prompt,
-                   encoder_prompt_token_ids=encoder_prompt_token_ids)
+                   encoder_prompt_token_ids=encoder_prompt_token_ids,
+                   prefill_hidden_states=getattr(seq_group, "prefill_hidden_states", None))
 
     def __repr__(self) -> str:
         return (f"RequestOutput(request_id={self.request_id}, "

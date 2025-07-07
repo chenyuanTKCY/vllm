@@ -114,6 +114,7 @@ class SamplingParams(
         truncate_prompt_tokens: If set to an integer k, will use only the last k
             tokens from the prompt (i.e., left truncation). Defaults to None
             (i.e., no truncation).
+        prefill_hidden_layer: Field used for hidden states extraction
     """
 
     n: int = 1
@@ -147,6 +148,9 @@ class SamplingParams(
     logits_processors: Optional[Any] = None
     include_stop_str_in_output: bool = False
     truncate_prompt_tokens: Optional[Annotated[int, msgspec.Meta(ge=1)]] = None
+    
+    # Field used for hidden states extraction
+    prefill_hidden_layer: Optional[int] = None
 
     # The below fields are not supposed to be used as an input.
     # They are set in post_init.
@@ -182,6 +186,7 @@ class SamplingParams(
         logits_processors: Optional[List[LogitsProcessor]] = None,
         truncate_prompt_tokens: Optional[Annotated[int,
                                                    msgspec.Meta(ge=1)]] = None,
+        prefill_hidden_layer: Optional[int] = None,
     ) -> "SamplingParams":
         return SamplingParams(
             n=1 if n is None else n,
@@ -213,6 +218,7 @@ class SamplingParams(
             spaces_between_special_tokens=spaces_between_special_tokens,
             logits_processors=logits_processors,
             truncate_prompt_tokens=truncate_prompt_tokens,
+            prefill_hidden_layer=prefill_hidden_layer,
         )
 
     def __post_init__(self) -> None:
@@ -429,4 +435,5 @@ class SamplingParams(
             f"skip_special_tokens={self.skip_special_tokens}, "
             "spaces_between_special_tokens="
             f"{self.spaces_between_special_tokens}, "
-            f"truncate_prompt_tokens={self.truncate_prompt_tokens})")
+            f"truncate_prompt_tokens={self.truncate_prompt_tokens}, "
+            f"prefill_hidden_layer={self.prefill_hidden_layer})")

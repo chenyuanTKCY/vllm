@@ -1231,6 +1231,14 @@ class LLMEngine:
             if seq_group_meta.do_sample:
                 self.output_processor.process_outputs(seq_group, outputs)
 
+            # 捕获 prefill 隐藏状态（仅在 prompt 阶段第一步返回）。
+            if (output is not None and len(output) > 0
+                    and isinstance(output[0], SamplerOutput)
+                    and output[0].prefill_hidden_states is not None):
+                if (not hasattr(seq_group, "prefill_hidden_states")
+                        or seq_group.prefill_hidden_states is None):
+                    seq_group.prefill_hidden_states = output[0].prefill_hidden_states
+
         # Free the finished sequence groups.
         for scheduler in self.scheduler:
             scheduler.free_finished_seq_groups()

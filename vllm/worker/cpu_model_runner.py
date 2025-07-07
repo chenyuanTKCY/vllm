@@ -386,3 +386,21 @@ class CPUModelRunner(ModelRunnerBase[CPUModelInput]):
             sampling_metadata=model_input.sampling_metadata,
         )
         return [output]
+
+    def _register_hidden_hook(self, layer_idx: int):
+        layer_list = None
+        for obj in self.model.modules():
+            if isinstance(obj, (list, torch.nn.ModuleList)) and len(obj) > layer_idx:
+                layer_list = obj
+                break
+        
+        # Fallback: search recursively for any ModuleList long enough
+        if layer_list is None:
+            for mod in self.model.modules():
+                if isinstance(mod, torch.nn.ModuleList) and len(mod) > layer_idx:
+                    layer_list = mod
+                    break
+        
+        if layer_list is None:
+            logger.warning(f"Could not find layer list in model for layer {layer_idx}")
+            return
