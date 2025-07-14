@@ -75,6 +75,7 @@ def test_hidden_states_extraction():
                         print(f"    输出: {completion}")
                         
         except Exception as e:
+            traceback.print_exc()
             print(f"  ✗ 第 {layer_idx} 层测试失败: {e}")
     
     # 测试不指定层的情况（应该使用默认行为）

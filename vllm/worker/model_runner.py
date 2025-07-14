@@ -976,12 +976,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         # Try to find the layer list in common model structures
         candidates = ["model.layers", "layers", "transformer.h", "transformer.layers"]
         layer_list = None
-        print(f"layer_list: {layer_list}")
         
         for cand in candidates:
             obj = self.model.language_model
             for tok in cand.split("."):
-                print(obj.keys())
                 if hasattr(obj, tok):
                     obj = getattr(obj, tok)
                 else:
@@ -990,8 +988,6 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             if isinstance(obj, (list, torch.nn.ModuleList)) and len(obj) > layer_idx:
                 layer_list = obj
                 break
-        
-        print(f"layer_list: {layer_list}")
         
         if layer_list is None or layer_idx >= len(layer_list):
             logger.warning("Cannot find layer %d to capture hidden states. "
