@@ -103,6 +103,8 @@ class Sampler(nn.Module):
             sampling_metadata: Metadata for sampling.
         """
         assert logits is not None
+        if type(logits) is tuple:
+            logits = logits[0]
         _, vocab_size = logits.shape
 
         # Prepare sampling tensors with pinned memory to avoid blocking.

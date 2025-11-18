@@ -50,7 +50,7 @@ from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter, Device
 from vllm.version import __version__ as VLLM_VERSION
-
+#------------------------------changed------------------------------#
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
 
@@ -1231,13 +1231,13 @@ class LLMEngine:
             if seq_group_meta.do_sample:
                 self.output_processor.process_outputs(seq_group, outputs)
 
-            # 捕获 prefill 隐藏状态（仅在 prompt 阶段第一步返回）。
-            if (output is not None and len(output) > 0
-                    and isinstance(output[0], SamplerOutput)
-                    and output[0].prefill_hidden_states is not None):
-                if (not hasattr(seq_group, "prefill_hidden_states")
-                        or seq_group.prefill_hidden_states is None):
-                    seq_group.prefill_hidden_states = output[0].prefill_hidden_states
+            # # 捕获 prefill 隐藏状态（仅在 prompt 阶段第一步返回）。
+            # if (output is not None and len(output) > 0
+            #         and isinstance(output[0], SamplerOutput)
+            #         and output[0].prefill_hidden_states is not None):
+            #     if (not hasattr(seq_group, "prefill_hidden_states")
+            #             or seq_group.prefill_hidden_states is None):
+            #         seq_group.prefill_hidden_states = output[0].prefill_hidden_states
 
         # Free the finished sequence groups.
         for scheduler in self.scheduler:
@@ -1331,7 +1331,8 @@ class LLMEngine:
                 running_queue_size=scheduler_outputs.running_queue_size,
                 finished_requests_ids=finished_requests_ids)
             output = self.model_executor.execute_model(
-                execute_model_req=execute_model_req)
+                execute_model_req=execute_model_req)    # [GAME POINT] 找到hidden_states返回接口的关键点
+            # print(type(output))
         else:
             output = []
 

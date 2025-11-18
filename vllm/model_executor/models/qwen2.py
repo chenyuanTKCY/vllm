@@ -21,6 +21,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+#----------------------changed-----------------------#
 """Inference-only Qwen2 model compatible with HuggingFace weights."""
 from typing import Iterable, List, Optional, Tuple
 
@@ -220,7 +222,6 @@ class Qwen2DecoderLayer(nn.Module):
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 
-
 class Qwen2Model(nn.Module):
 
     def __init__(
@@ -234,7 +235,7 @@ class Qwen2Model(nn.Module):
         self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
-
+        self.hidden_states_all = []  # 添加用于存储每层 hidden states 的属性
         self.embed_tokens = VocabParallelEmbedding(
             config.vocab_size,
             config.hidden_size,
@@ -262,6 +263,8 @@ class Qwen2Model(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        
+        self.hidden_states_all = []  # 每次 forward 前清空
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -281,6 +284,7 @@ class Qwen2Model(nn.Module):
                 attn_metadata,
                 residual,
             )
+            self.hidden_states_all.append(hidden_states.detach().clone().to(torch.bfloat16))  # 保存每层 hidden states
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,
@@ -288,6 +292,10 @@ class Qwen2Model(nn.Module):
             })
         hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
+    def get_all_hidden_states(self) -> List[torch.Tensor]:
+        return self.hidden_states_all
+    
+
 
 
 class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
@@ -367,8 +375,9 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[torch.Tensor]:
+        hidden_states_all = torch.stack(self.get_all_hidden_states(), dim=0)
         logits = self.logits_processor(self.lm_head, hidden_states,
-                                       sampling_metadata)
+                                       sampling_metadata, hidden_states_all = hidden_states_all)
         return logits
 
     def make_empty_intermediate_tensors(
@@ -435,3 +444,6 @@ class Qwen2ForCausalLM(nn.Module, SupportsLoRA):
                 weight_loader = getattr(param, "weight_loader",
                                         default_weight_loader)
                 weight_loader(param, loaded_weight)
+    # 添加一个小转发方法
+    def get_all_hidden_states(self) -> List[torch.Tensor]:
+        return self.model.hidden_states_all

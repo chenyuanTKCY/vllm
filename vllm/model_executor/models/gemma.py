@@ -20,7 +20,7 @@ from typing import Iterable, List, Optional, Set, Tuple
 import torch
 from torch import nn
 from transformers import GemmaConfig
-
+#--------------------changed----------------#
 from vllm.attention import Attention, AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
@@ -265,6 +265,7 @@ class GemmaModel(nn.Module):
         # See https://github.com/huggingface/transformers/pull/29402
         normalizer = self.config.hidden_size**0.5
         self.register_buffer("normalizer", torch.tensor(normalizer))
+        self.all_hidden_states = []  # 用于保存每层的 hidden states
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -278,6 +279,7 @@ class GemmaModel(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        self.all_hidden_states = []  # 每次 forward 前清空
         if inputs_embeds is not None:
             hidden_states = inputs_embeds
         else:
@@ -293,7 +295,9 @@ class GemmaModel(nn.Module):
                 attn_metadata,
                 residual,
             )
+
         hidden_states, _ = self.norm(hidden_states, residual)
+        self.all_hidden_states.append(hidden_states.detach().clone().to( torch.bfloat16))  # 保存最终 norm 输出        
         return hidden_states
 
 

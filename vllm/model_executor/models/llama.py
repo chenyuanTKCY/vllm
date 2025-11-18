@@ -22,7 +22,7 @@
 # limitations under the License.
 """Inference-only LLaMA model compatible with HuggingFace weights."""
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
-
+#------------------------changed-------------------------#
 import torch
 from torch import nn
 from transformers import LlamaConfig
@@ -300,6 +300,7 @@ class LlamaModel(nn.Module):
             self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         else:
             self.norm = PPMissingLayer()
+        self.all_hidden_states = []  # 用于保存每层的 hidden states
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -313,6 +314,8 @@ class LlamaModel(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors],
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
+        
+        self.all_hidden_states = []  # 每次 forward 前清空
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -339,8 +342,10 @@ class LlamaModel(nn.Module):
                 "hidden_states": hidden_states,
                 "residual": residual
             })
+        
 
         hidden_states, _ = self.norm(hidden_states, residual)
+        self.all_hidden_states.append(hidden_states.detach().clone().to( torch.bfloat16))  # 保存最终 norm 输出        
         return hidden_states
 
 
