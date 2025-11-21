@@ -104,7 +104,8 @@ class RequestOutput:
         lora_request: Optional[LoRARequest] = None,
         encoder_prompt: Optional[str] = None,
         encoder_prompt_token_ids: Optional[List[int]] = None,
-        prefill_hidden_states: Optional[torch.Tensor] = None,
+        hidden_states_decode: Optional[List[List[torch.Tensor]]] = None,
+        hidden_states_prefill: Optional[List[torch.Tensor]] = None
     ) -> None:
         self.request_id = request_id
         self.prompt = prompt
@@ -116,7 +117,8 @@ class RequestOutput:
         self.lora_request = lora_request
         self.encoder_prompt = encoder_prompt
         self.encoder_prompt_token_ids = encoder_prompt_token_ids
-        self.prefill_hidden_states = prefill_hidden_states
+        self.hidden_states_decode = hidden_states_decode
+        self.hidden_states_prefill = hidden_states_prefill
 
     @classmethod
     def from_seq_group(cls, seq_group: SequenceGroup) -> "RequestOutput":
@@ -151,8 +153,7 @@ class RequestOutput:
                 seq.get_cumulative_logprob() if include_logprobs else None,
                 seq.output_logprobs if include_logprobs else None,
                 SequenceStatus.get_finished_reason(seq.status),
-                seq.stop_reason,
-                prefill_hidden_states=getattr(seq_group, "prefill_hidden_states", None)) for seq in top_n_seqs
+                seq.stop_reason) for seq in top_n_seqs
         ]
 
         # Every sequence in the sequence group should have the same prompt.
@@ -164,6 +165,16 @@ class RequestOutput:
         finished = seq_group.is_finished()
         finished_time = time.time() if finished else None
         seq_group.set_finished_time(finished_time)
+
+        # 1. 从SequenceGroup 对象中获取 Prefill 阶段的隐藏状态
+        # 我们使用了 getattr 来安全地获取 hidden_states_prefill 属性，如果不存在则返回None
+        hidden_states_prefill = getattr(seq_group, 'hidden_states_prefill', None)
+
+        # 2. 从每个Sequence 对象中获取 Decode 阶段的隐藏状态
+        hidden_states_list = [
+            seq.hidden_states for seq in top_n_seqs
+        ]
+         
         return cls(seq_group.request_id,
                    prompt,
                    prompt_token_ids,
@@ -172,21 +183,25 @@ class RequestOutput:
                    finished,
                    seq_group.metrics,
                    lora_request=seq_group.lora_request,
-                   encoder_prompt=encoder_prompt,
-                   encoder_prompt_token_ids=encoder_prompt_token_ids,
-                   prefill_hidden_states=getattr(seq_group, "prefill_hidden_states", None))
+                   hidden_states_decode=hidden_states_list,
+                   hidden_states_prefill=hidden_states_prefill)
 
     def __repr__(self) -> str:
-        return (f"RequestOutput(request_id={self.request_id}, "
-                f"prompt={self.prompt!r}, "
-                f"prompt_token_ids={self.prompt_token_ids}, "
-                f"encoder_prompt={self.encoder_prompt!r}, "
-                f"encoder_prompt_token_ids={self.encoder_prompt_token_ids}, "
-                f"prompt_logprobs={self.prompt_logprobs}, "
-                f"outputs={self.outputs}, "
-                f"finished={self.finished}, "
-                f"metrics={self.metrics}, "
-                f"lora_request={self.lora_request})")
+        parts = [
+            f"RequestOutput(",
+            f"request_id={self.request_id}",
+            f"prompt={self.prompt!r}",
+            f"prompt_token_ids={self.prompt_token_ids}",
+            f"prompt_logprobs={self.prompt_logprobs}",
+            f"outputs={self.outputs}",
+            f"finished={self.finished}",
+            f"metrics={self.metrics}",
+            f"lora_request={self.lora_request}",
+            f"hidden_states_decode={self.hidden_states_decode}",
+            f"hidden_states_prefill={self.hidden_states_prefill}",
+            ")"
+        ]
+        return ", ".join(parts)
 
 
 class EmbeddingRequestOutput:

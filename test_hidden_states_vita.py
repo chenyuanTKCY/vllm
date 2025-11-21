@@ -14,7 +14,7 @@ def test_hidden_states_extraction():
     """测试在 prefill 阶段获取指定层的 hidden states"""
     
     # 从 server_vla.py 复制的模型路径
-    model_path = "/root/VITA/checkpoints/demo_VITA_ckpt"
+    model_path = "/home/cyzhang/.cache/modelscope/hub/models/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B/"
     
     print("正在初始化 vLLM 引擎...")
     import traceback
@@ -38,7 +38,7 @@ def test_hidden_states_extraction():
     test_prompt = "请介绍一下人工智能的发展历史。"
     
     # 测试不同层的 hidden states 获取
-    test_layers = [12]
+    test_layers = [11,12]
     
     for layer_idx in test_layers:
         print(f"\n测试获取第 {layer_idx} 层的 hidden states...")
@@ -46,7 +46,7 @@ def test_hidden_states_extraction():
         try:
             # 创建 SamplingParams，指定要获取的层
             sampling_params = SamplingParams(
-                max_tokens=1,  # 只生成一个 token，专注于 prefill 阶段
+                max_tokens=64,  # 只生成一个 token，专注于 prefill 阶段
                 temperature=0.0,  # 确定性输出
                 prefill_hidden_layer=layer_idx,  # 指定要获取的层
             )
@@ -105,7 +105,7 @@ def test_hidden_states_extraction():
 def test_compatibility():
     """测试兼容性：确保不使用新功能时模型仍能正常工作"""
     
-    model_path = "/root/VITA/checkpoints/demo_VITA_ckpt"
+    model_path = "/home/cyzhang/.cache/modelscope/hub/models/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B/"
     
     print("\n=== 兼容性测试 ===")
     print("测试不使用 prefill_hidden_layer 时的正常推理...")

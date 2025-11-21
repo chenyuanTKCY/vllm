@@ -20,7 +20,7 @@ from typing import Iterable, List, Optional, Set, Tuple
 import torch
 from torch import nn
 from transformers import GemmaConfig
-
+#--------------------changed----------------#
 from vllm.attention import Attention, AttentionMetadata
 from vllm.config import CacheConfig, LoRAConfig
 from vllm.distributed import get_tensor_model_parallel_world_size
@@ -265,6 +265,7 @@ class GemmaModel(nn.Module):
         # See https://github.com/huggingface/transformers/pull/29402
         normalizer = self.config.hidden_size**0.5
         self.register_buffer("normalizer", torch.tensor(normalizer))
+        self.hidden_states_all = []  # 添加用于存储每层 hidden states 的属性
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -278,6 +279,7 @@ class GemmaModel(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        self.hidden_states_all = []  # 每次 forward 前清空
         if inputs_embeds is not None:
             hidden_states = inputs_embeds
         else:
@@ -293,9 +295,13 @@ class GemmaModel(nn.Module):
                 attn_metadata,
                 residual,
             )
-        hidden_states, _ = self.norm(hidden_states, residual)
-        return hidden_states
+            self.hidden_states_all.append(hidden_states.detach().clone().to(torch.bfloat16))  # 保存每层 hidden states
 
+        hidden_states, _ = self.norm(hidden_states, residual)
+               
+        return hidden_states
+    def get_all_hidden_states(self) -> List[torch.Tensor]:
+        return self.hidden_states_all
 
 class GemmaForCausalLM(nn.Module, SupportsLoRA):
     packed_modules_mapping = {
@@ -357,8 +363,9 @@ class GemmaForCausalLM(nn.Module, SupportsLoRA):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[torch.Tensor]:
-        logits = self.logits_processor(self.model.embed_tokens, hidden_states,
-                                       sampling_metadata)
+        hidden_states_all = torch.stack(self.get_all_hidden_states(), dim=0)
+        logits = self.logits_processor(self.lm_head, hidden_states,
+                                       sampling_metadata, hidden_states_all = hidden_states_all)
         return logits
 
     def sample(
@@ -410,3 +417,6 @@ class GemmaForCausalLM(nn.Module, SupportsLoRA):
             logger.warning(
                 "Some weights are not initialized from checkpoints: %s",
                 unloaded_params)
+    # 添加一个小转发方法
+    def get_all_hidden_states(self) -> List[torch.Tensor]:
+        return self.model.hidden_states_all

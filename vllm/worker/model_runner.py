@@ -1,3 +1,4 @@
+# --------------------changed------------------#
 import dataclasses
 import gc
 import inspect
@@ -20,7 +21,7 @@ from vllm.attention.backends.abstract import AttentionState
 from vllm.attention.backends.utils import CommonAttentionState
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ObservabilityConfig, ParallelConfig,
-                         PromptAdapterConfig, SchedulerConfig)
+                         PromptAdapterConfig, SchedulerConfig, MultiModalConfig)
 from vllm.distributed import get_pp_group
 from vllm.distributed.parallel_state import graph_capture
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
@@ -807,10 +808,13 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
-        return_hidden_states: bool = False,
         observability_config: Optional[ObservabilityConfig] = None,
         input_registry: InputRegistry = INPUT_REGISTRY,
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
+        multimodal_config: Optional[MultiModalConfig] = None,
+        return_hidden_states: bool = False,
+        return_prefill: bool = True,
+        return_decode: bool = True,
     ):
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -821,7 +825,10 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         self.load_config = load_config
         self.is_driver_worker = is_driver_worker
         self.prompt_adapter_config = prompt_adapter_config
+        self.multimodal_config = multimodal_config
         self.return_hidden_states = return_hidden_states
+        self.return_decode = return_decode
+        self.return_prefill = return_prefill
         self.observability_config = observability_config
 
         # Hidden states extraction
@@ -978,7 +985,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         layer_list = None
         
         for cand in candidates:
-            obj = self.model.language_model
+            obj = self.model.model
             for tok in cand.split("."):
                 if hasattr(obj, tok):
                     obj = getattr(obj, tok)
@@ -1418,7 +1425,18 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                                    sampling_metadata=sampling_metadata,
                                    is_prompt=is_prompt,
                                    virtual_engine=virtual_engine)
-
+    @staticmethod  # 添加静态方法装饰器
+    def pad_tensor_left(tensor: torch.Tensor, target_length: int, pad_value: float = 0.0) -> torch.Tensor:
+        """Left pad a tensor along dim=0 to reach target_length."""
+        current_length = tensor.size(0)
+        if current_length >= target_length:
+            return tensor
+        padding_length = target_length - current_length
+        padding_shape = list(tensor.shape)
+        padding_shape[0] = padding_length
+        padding = torch.full(padding_shape, pad_value, dtype=tensor.dtype, device=tensor.device)
+        return torch.cat([padding, tensor], dim=0)
+    
     @torch.inference_mode()
     def execute_model(
         self,
@@ -1471,27 +1489,27 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             model_forward_end = torch.cuda.Event(enable_timing=True)
             model_forward_start.record()
 
-        # Check if we need to capture hidden states for specific layer
-        capture_layer_idx = None
-        is_prompt = model_input.is_prompt
-        if is_prompt and model_input.sampling_metadata:
-            for seq_group in model_input.sampling_metadata.seq_groups:
-                if seq_group.sampling_params.prefill_hidden_layer is not None:
-                    layer_idx = seq_group.sampling_params.prefill_hidden_layer
-                    # Validate layer index
-                    num_layers = self.model_config.get_num_layers(self.parallel_config)
-                    if layer_idx < 0 or layer_idx >= num_layers:
-                        raise ValueError(
-                            f"prefill_hidden_layer {layer_idx} is out of range "
-                            f"[0, {num_layers}). Model has {num_layers} layers."
-                        )
-                    capture_layer_idx = layer_idx
-                    break
+        # # Check if we need to capture hidden states for specific layer
+        # capture_layer_idx = None
+        # is_prompt = model_input.is_prompt
+        # if is_prompt and model_input.sampling_metadata:
+        #     for seq_group in model_input.sampling_metadata.seq_groups:
+        #         if seq_group.sampling_params.prefill_hidden_layer is not None:
+        #             layer_idx = seq_group.sampling_params.prefill_hidden_layer
+        #             # Validate layer index
+        #             num_layers = self.model_config.get_num_layers(self.parallel_config)
+        #             if layer_idx < 0 or layer_idx >= num_layers:
+        #                 raise ValueError(
+        #                     f"prefill_hidden_layer {layer_idx} is out of range "
+        #                     f"[0, {num_layers}). Model has {num_layers} layers."
+        #                 )
+        #             capture_layer_idx = layer_idx
+        #             break
         
-        # Register hook if needed
-        if capture_layer_idx is not None:
-            self._captured_hidden = None
-            self._register_hidden_hook(capture_layer_idx)
+        # # Register hook if needed
+        # if capture_layer_idx is not None:
+        #     self._captured_hidden = None
+        #     self._register_hidden_hook(capture_layer_idx)
 
         hidden_or_intermediate_states = model_executable(
             input_ids=model_input.input_tokens,
@@ -1569,18 +1587,19 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
 
             output.hidden_states = hidden_states
 
-        # Handle custom hidden states from hook for specific layer
-        if capture_layer_idx is not None and self._captured_hidden is not None:
-            # Only store for prefill, and overwrite prefill_hidden_states if captured
-            if model_input.is_prompt:
-                output.prefill_hidden_states = self._captured_hidden
-                # Clean up the hook and captured data
-                if self._hook_handle is not None:
-                    self._hook_handle.remove()
-                    self._hook_handle = None
-                self._captured_hidden = None
+        # # Handle custom hidden states from hook for specific layer
+        # if capture_layer_idx is not None and self._captured_hidden is not None:
+        #     # Only store for prefill, and overwrite prefill_hidden_states if captured
+        #     if model_input.is_prompt:
+        #         output.prefill_hidden_states = self._captured_hidden
+        #         # Clean up the hook and captured data
+        #         if self._hook_handle is not None:
+        #             self._hook_handle.remove()
+        #             self._hook_handle = None
+        #         self._captured_hidden = None
 
         return [output]
+
 
 
 class CUDAGraphRunner:

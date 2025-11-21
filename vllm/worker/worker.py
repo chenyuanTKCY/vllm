@@ -1,3 +1,4 @@
+#-----------------------changed-------------------------#
 """A GPU worker class."""
 import gc
 import os
@@ -108,6 +109,9 @@ class Worker(LocalOrDistributedWorkerBase):
             is_driver_worker=is_driver_worker,
             prompt_adapter_config=prompt_adapter_config,
             observability_config=observability_config,
+            return_hidden_states=False,  # <--- 仅在 draft_model_config 是 mlp_speculator 时才需要
+            return_decode=True,
+            return_prefill=False,
             **speculative_args,
         )
         # Uninitialized cache engine. Will be initialized by

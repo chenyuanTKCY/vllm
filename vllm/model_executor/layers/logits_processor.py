@@ -49,6 +49,7 @@ class LogitsProcessor(nn.Module):
         lm_head: VocabParallelEmbedding,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
+        hidden_states_all: Optional[torch.Tensor] = None,
         embedding_bias: Optional[torch.Tensor] = None,
     ) -> Optional[torch.Tensor]:
         if self.logits_as_input:
@@ -59,6 +60,7 @@ class LogitsProcessor(nn.Module):
 
             # Get the logits for the next tokens.
             logits = self._get_logits(hidden_states, lm_head, embedding_bias)
+        
         if logits is not None:
             if self.soft_cap is not None:
                 logits = logits / self.soft_cap
@@ -69,7 +71,10 @@ class LogitsProcessor(nn.Module):
                 logits *= self.scale
 
             # Apply logits processors (if any).
-            logits = _apply_logits_processors(logits, sampling_metadata)
+            # 加上钩子
+            sampling_metadata.hidden_states = hidden_states_all
+            logits= _apply_logits_processors(logits, sampling_metadata)
+            
 
         return logits
 
@@ -119,10 +124,12 @@ def _apply_logits_processors(
 ) -> torch.Tensor:
     found_logits_processors = False
     logits_processed = 0
+    
     for seq_group in sampling_metadata.seq_groups:
         seq_ids = seq_group.seq_ids
         sampling_params = seq_group.sampling_params
         logits_processors = sampling_params.logits_processors
+        
         if logits_processors:
             found_logits_processors = True
 
@@ -131,21 +138,35 @@ def _apply_logits_processors(
                 logits_row = logits[logits_row_idx]
                 past_tokens_ids = seq_group.seq_data[seq_id].output_token_ids
                 prompt_tokens_ids = seq_group.seq_data[seq_id].prompt_token_ids
-
+                hidden_states = getattr(sampling_metadata, 'hidden_states', None)
                 for logits_processor in logits_processors:
+
                     parameters = inspect.signature(logits_processor).parameters
-                    if len(parameters) == 3:
+                    # print("PROCESSOR SIGNATURE =", inspect.signature(logits_processor.__call__))
+                    if len(parameters) == 5:
                         logits_row = logits_processor(prompt_tokens_ids,
                                                       past_tokens_ids,
-                                                      logits_row)
+                                                      logits_row,
+                                                      hidden_states,
+                                                      seq_id)
+                    elif len(parameters) == 4:
+                        logits_row = logits_processor(past_tokens_ids,
+                                                      logits_row,
+                                                      hidden_states,
+                                                      seq_id)
                     else:
                         logits_row = logits_processor(past_tokens_ids,
-                                                      logits_row)
-
+                                                      logits_row,
+                                                      seq_id)
+                if isinstance(logits_row, tuple):
+                    print(">>> BAD PROCESSOR:", logits_processor)
+                    print("    type:", type(logits_processor))
+                    print("    sig:", inspect.signature(logits_processor))
                 logits[logits_row_idx] = logits_row
 
         logits_processed += len(seq_group.sample_indices) + len(
             seq_group.prompt_logprob_indices)
+
 
     if found_logits_processors:
         # verifies that no rows in logits were missed unexpectedly

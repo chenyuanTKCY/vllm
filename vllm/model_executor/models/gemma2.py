@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Iterable, List, Optional, Set, Tuple
-
+#--------------------changed---------------------#
 import torch
 from torch import nn
 from transformers import Gemma2Config
@@ -264,6 +264,7 @@ class Gemma2Model(nn.Module):
         # See https://github.com/huggingface/transformers/pull/29402
         normalizer = self.config.hidden_size**0.5
         self.register_buffer("normalizer", torch.tensor(normalizer))
+        self.all_hidden_states = []  # 用于保存每层的 hidden states
 
     def forward(
         self,
@@ -272,6 +273,7 @@ class Gemma2Model(nn.Module):
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
     ) -> torch.Tensor:
+        self.all_hidden_states = []  # 每次 forward 前清空
         hidden_states = self.embed_tokens(input_ids)
         hidden_states *= self.normalizer
 
@@ -285,7 +287,10 @@ class Gemma2Model(nn.Module):
                 attn_metadata,
                 residual,
             )
+        
+
         hidden_states, _ = self.norm(hidden_states, residual)
+        self.all_hidden_states.append(hidden_states.detach().clone().to( torch.bfloat16))  # 保存最终 norm 输出
         return hidden_states
 
 

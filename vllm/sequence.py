@@ -225,6 +225,18 @@ class SequenceData(msgspec.Struct,
         self._cached_all_token_ids.append(token_id)
         self._cumulative_logprob += logprob
 
+    def append_hidden_state(
+        self,
+        token_id: int,
+        hidden_states_tensor: torch.tensor,
+    ) -> None:
+
+        """使用torch.cat实现增量存储"""
+        # 假设 hidden_states_tensor 是 [num_layers, hidden_dim]
+        new_entry = hidden_states_tensor.unsqueeze(0)  # 变成 [1, num_layers, hidden_dim]
+        new_entry = new_entry.to(self.hidden_states.device)  # 确保设备一致
+        self.hidden_states = torch.cat([self.hidden_states, new_entry], dim=0)
+
     def get_len(self) -> int:
         return len(self._output_token_ids) + len(self._prompt_token_ids)
 
@@ -360,6 +372,21 @@ class Sequence:
         self.from_decoder_prompt = from_decoder_prompt
         self._prompt: Optional[str] = None
         self._prompt_token_ids: Optional[List[int]] = None
+
+        # self.data = SequenceData(self.prompt_token_ids)
+        self.output_logprobs: SampleLogprobs = []
+        self.output_text = ""
+
+        self.status = SequenceStatus.WAITING
+        self.stop_reason: Union[int, str, None] = None
+
+        # Used for incremental detokenization
+        self.prefix_offset = 0
+        self.read_offset = 0
+        # Input + output tokens
+        self.tokens: Optional[List[str]] = None
+        # 魔改
+        self.hidden_states = torch.empty(0, device='cpu', dtype=torch.bfloat16)  # 初始化为空张量
 
         # For decoder-only models, a Sequence is constructed
         # from an LLMInputs instance (the `inputs` arg.)
