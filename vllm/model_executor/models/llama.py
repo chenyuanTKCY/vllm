@@ -300,7 +300,7 @@ class LlamaModel(nn.Module):
             self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         else:
             self.norm = PPMissingLayer()
-        self.all_hidden_states = []  # 用于保存每层的 hidden states
+        self.hidden_states_all = []  # 添加用于存储每层 hidden states 的属性
 
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
@@ -315,7 +315,7 @@ class LlamaModel(nn.Module):
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
         
-        self.all_hidden_states = []  # 每次 forward 前清空
+        self.hidden_states_all = []  # 每次 forward 前清空
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -336,7 +336,7 @@ class LlamaModel(nn.Module):
                 attn_metadata,
                 residual,
             )
-
+            self.hidden_states_all.append(hidden_states.detach().clone().to(torch.bfloat16))  # 保存每层 hidden states
         if not get_pp_group().is_last_rank:
             return IntermediateTensors({
                 "hidden_states": hidden_states,
@@ -344,10 +344,11 @@ class LlamaModel(nn.Module):
             })
         
 
-        hidden_states, _ = self.norm(hidden_states, residual)
-        self.all_hidden_states.append(hidden_states.detach().clone().to( torch.bfloat16))  # 保存最终 norm 输出        
+        hidden_states, _ = self.norm(hidden_states, residual)     
         return hidden_states
-
+    
+    def get_all_hidden_states(self) -> List[torch.Tensor]:
+        return self.hidden_states_all
 
 class LlamaForCausalLM(nn.Module, SupportsLoRA):
     packed_modules_mapping = {
@@ -440,8 +441,9 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
     ) -> Optional[torch.Tensor]:
+        hidden_states_all = torch.stack(self.get_all_hidden_states(), dim=0)
         logits = self.logits_processor(self.lm_head, hidden_states,
-                                       sampling_metadata)
+                                       sampling_metadata, hidden_states_all = hidden_states_all)
         return logits
 
     def sample(
@@ -554,3 +556,6 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
             else:
                 raise RuntimeError("Self attention has no KV cache scaling "
                                    "factor attribute!")
+    # 添加一个小转发方法
+    def get_all_hidden_states(self) -> List[torch.Tensor]:
+        return self.model.hidden_states_all

@@ -60,6 +60,7 @@ class LogitsProcessor(nn.Module):
 
             # Get the logits for the next tokens.
             logits = self._get_logits(hidden_states, lm_head, embedding_bias)
+        
         if logits is not None:
             if self.soft_cap is not None:
                 logits = logits / self.soft_cap
@@ -139,20 +140,24 @@ def _apply_logits_processors(
                 prompt_tokens_ids = seq_group.seq_data[seq_id].prompt_token_ids
                 hidden_states = getattr(sampling_metadata, 'hidden_states', None)
                 for logits_processor in logits_processors:
+
                     parameters = inspect.signature(logits_processor).parameters
-                    print("PROCESSOR SIGNATURE =", inspect.signature(logits_processor.__call__))
-                    if len(parameters) == 4:
+                    # print("PROCESSOR SIGNATURE =", inspect.signature(logits_processor.__call__))
+                    if len(parameters) == 5:
                         logits_row = logits_processor(prompt_tokens_ids,
                                                       past_tokens_ids,
                                                       logits_row,
-                                                      hidden_states)
-                    elif len(parameters) == 3:
+                                                      hidden_states,
+                                                      seq_id)
+                    elif len(parameters) == 4:
                         logits_row = logits_processor(past_tokens_ids,
                                                       logits_row,
-                                                      hidden_states)
+                                                      hidden_states,
+                                                      seq_id)
                     else:
                         logits_row = logits_processor(past_tokens_ids,
-                                                      logits_row,)
+                                                      logits_row,
+                                                      seq_id)
                 if isinstance(logits_row, tuple):
                     print(">>> BAD PROCESSOR:", logits_processor)
                     print("    type:", type(logits_processor))
